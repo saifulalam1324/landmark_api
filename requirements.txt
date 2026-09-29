@@ -1,4 +1,5 @@
 Flask==3.1.2
+gunicorn
 torch
 torchvision
 Pillow
