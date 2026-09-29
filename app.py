@@ -3,7 +3,6 @@ from PIL import Image
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
-import os
 
 
 # ============================================================
@@ -19,7 +18,9 @@ app = Flask(__name__)
 
 MODEL_PATH = "landmark_resnet.pth"
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Render Free uses CPU.
+# Force CPU instead of checking for CUDA.
+DEVICE = torch.device("cpu")
 
 print("Using device:", DEVICE)
 
@@ -32,7 +33,7 @@ print("Loading checkpoint...")
 
 checkpoint = torch.load(
     MODEL_PATH,
-    map_location=DEVICE,
+    map_location="cpu",
     weights_only=False
 )
 
@@ -40,7 +41,7 @@ print("Checkpoint loaded.")
 
 
 # ============================================================
-# Read information stored inside checkpoint
+# Read checkpoint information
 # ============================================================
 
 class_names = checkpoint["class_names"]
@@ -50,7 +51,10 @@ image_size = checkpoint["image_size"]
 mean = checkpoint["mean"]
 std = checkpoint["std"]
 
-architecture = checkpoint.get("architecture", "Unknown")
+architecture = checkpoint.get(
+    "architecture",
+    "ResNet50"
+)
 
 print("Architecture:", architecture)
 print("Number of classes:", num_classes)
@@ -64,24 +68,12 @@ print("Classes:", class_names)
 
 model = models.resnet50(weights=None)
 
-
-# The checkpoint contains:
-#
-# fc.1.weight
-# fc.1.bias
-#
-# This means the original FC layer was replaced by
-# a Sequential layer.
-#
-# fc.0 = Dropout
-# fc.1 = Linear
-#
-# Dropout probability does not affect prediction because
-# model.eval() is used during inference.
-
 model.fc = nn.Sequential(
     nn.Dropout(p=0.5),
-    nn.Linear(model.fc.in_features, num_classes)
+    nn.Linear(
+        model.fc.in_features,
+        num_classes
+    )
 )
 
 
@@ -89,13 +81,28 @@ model.fc = nn.Sequential(
 # Load trained weights
 # ============================================================
 
-model.load_state_dict(checkpoint["model_state_dict"])
+model.load_state_dict(
+    checkpoint["model_state_dict"]
+)
 
 model = model.to(DEVICE)
 
 model.eval()
 
+# Disable gradient calculation for the entire model
+for parameter in model.parameters():
+    parameter.requires_grad = False
+
 print("ResNet50 model loaded successfully.")
+
+
+# ============================================================
+# Delete checkpoint from memory
+# ============================================================
+
+del checkpoint
+
+print("Checkpoint removed from memory.")
 
 
 # ============================================================
@@ -103,7 +110,9 @@ print("ResNet50 model loaded successfully.")
 # ============================================================
 
 transform = transforms.Compose([
-    transforms.Resize((image_size, image_size)),
+    transforms.Resize(
+        (image_size, image_size)
+    ),
 
     transforms.ToTensor(),
 
@@ -140,19 +149,20 @@ def predict():
     try:
 
         # ----------------------------------------------------
-        # Check whether image exists
+        # Check image
         # ----------------------------------------------------
 
         if "image" not in request.files:
 
             return jsonify({
                 "success": False,
-                "error": "No image provided. Use form-data key: image"
+                "error": (
+                    "No image provided. "
+                    "Use form-data key: image"
+                )
             }), 400
 
-
         file = request.files["image"]
-
 
         # ----------------------------------------------------
         # Check filename
@@ -165,13 +175,11 @@ def predict():
                 "error": "No image selected"
             }), 400
 
-
         # ----------------------------------------------------
         # Open image
         # ----------------------------------------------------
 
         image = Image.open(file).convert("RGB")
-
 
         # ----------------------------------------------------
         # Preprocess
@@ -179,30 +187,30 @@ def predict():
 
         image_tensor = transform(image)
 
-        # Add batch dimension
         image_tensor = image_tensor.unsqueeze(0)
 
         image_tensor = image_tensor.to(DEVICE)
 
-
         # ----------------------------------------------------
-        # Model prediction
+        # Prediction
         # ----------------------------------------------------
 
-        with torch.no_grad():
+        with torch.inference_mode():
 
             outputs = model(image_tensor)
 
-            probabilities = torch.softmax(outputs, dim=1)
+            probabilities = torch.softmax(
+                outputs,
+                dim=1
+            )
 
             confidence, predicted_index = torch.max(
                 probabilities,
                 dim=1
             )
 
-
         # ----------------------------------------------------
-        # Convert result
+        # Result
         # ----------------------------------------------------
 
         class_id = predicted_index.item()
@@ -211,9 +219,16 @@ def predict():
 
         predicted_landmark = class_names[class_id]
 
+        # ----------------------------------------------------
+        # Release image tensors
+        # ----------------------------------------------------
+
+        del image_tensor
+        del outputs
+        del probabilities
 
         # ----------------------------------------------------
-        # Return JSON
+        # Return response
         # ----------------------------------------------------
 
         return jsonify({
@@ -231,10 +246,12 @@ def predict():
 
         })
 
-
     except Exception as e:
 
-        print("Prediction error:", str(e))
+        print(
+            "Prediction error:",
+            str(e)
+        )
 
         return jsonify({
 
@@ -246,7 +263,7 @@ def predict():
 
 
 # ============================================================
-# Run server
+# Local development
 # ============================================================
 
 if __name__ == "__main__":
@@ -254,5 +271,5 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=5000,
-        debug=True
+        debug=False
     )
