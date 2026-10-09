@@ -5,29 +5,13 @@ import torch.nn as nn
 from torchvision import models, transforms
 
 
-# ============================================================
-# Flask application
-# ============================================================
-
 app = Flask(__name__)
 
 
-# ============================================================
-# Configuration
-# ============================================================
-
 MODEL_PATH = "landmark_resnet.pth"
-
-# Render Free uses CPU.
-# Force CPU instead of checking for CUDA.
 DEVICE = torch.device("cpu")
 
 print("Using device:", DEVICE)
-
-
-# ============================================================
-# Load checkpoint
-# ============================================================
 
 print("Loading checkpoint...")
 
@@ -39,10 +23,6 @@ checkpoint = torch.load(
 
 print("Checkpoint loaded.")
 
-
-# ============================================================
-# Read checkpoint information
-# ============================================================
 
 class_names = checkpoint["class_names"]
 num_classes = checkpoint["num_classes"]
@@ -62,10 +42,6 @@ print("Image size:", image_size)
 print("Classes:", class_names)
 
 
-# ============================================================
-# Create ResNet50
-# ============================================================
-
 model = models.resnet50(weights=None)
 
 model.fc = nn.Sequential(
@@ -76,10 +52,6 @@ model.fc = nn.Sequential(
     )
 )
 
-
-# ============================================================
-# Load trained weights
-# ============================================================
 
 model.load_state_dict(
     checkpoint["model_state_dict"]
@@ -96,18 +68,11 @@ for parameter in model.parameters():
 print("ResNet50 model loaded successfully.")
 
 
-# ============================================================
-# Delete checkpoint from memory
-# ============================================================
-
 del checkpoint
 
 print("Checkpoint removed from memory.")
 
 
-# ============================================================
-# Image preprocessing
-# ============================================================
 
 transform = transforms.Compose([
     transforms.Resize(
@@ -123,10 +88,6 @@ transform = transforms.Compose([
 ])
 
 
-# ============================================================
-# Health check
-# ============================================================
-
 @app.route("/", methods=["GET"])
 def home():
 
@@ -139,18 +100,11 @@ def home():
     })
 
 
-# ============================================================
-# Prediction endpoint
-# ============================================================
-
 @app.route("/predict", methods=["POST"])
 def predict():
 
     try:
 
-        # ----------------------------------------------------
-        # Check image
-        # ----------------------------------------------------
 
         if "image" not in request.files:
 
@@ -164,9 +118,6 @@ def predict():
 
         file = request.files["image"]
 
-        # ----------------------------------------------------
-        # Check filename
-        # ----------------------------------------------------
 
         if file.filename == "":
 
@@ -175,15 +126,9 @@ def predict():
                 "error": "No image selected"
             }), 400
 
-        # ----------------------------------------------------
-        # Open image
-        # ----------------------------------------------------
 
         image = Image.open(file).convert("RGB")
 
-        # ----------------------------------------------------
-        # Preprocess
-        # ----------------------------------------------------
 
         image_tensor = transform(image)
 
@@ -191,9 +136,7 @@ def predict():
 
         image_tensor = image_tensor.to(DEVICE)
 
-        # ----------------------------------------------------
-        # Prediction
-        # ----------------------------------------------------
+
 
         with torch.inference_mode():
 
@@ -209,9 +152,7 @@ def predict():
                 dim=1
             )
 
-        # ----------------------------------------------------
-        # Result
-        # ----------------------------------------------------
+
 
         class_id = predicted_index.item()
 
@@ -219,17 +160,13 @@ def predict():
 
         predicted_landmark = class_names[class_id]
 
-        # ----------------------------------------------------
-        # Release image tensors
-        # ----------------------------------------------------
+
 
         del image_tensor
         del outputs
         del probabilities
 
-        # ----------------------------------------------------
-        # Return response
-        # ----------------------------------------------------
+
 
         return jsonify({
 
@@ -262,9 +199,6 @@ def predict():
         }), 500
 
 
-# ============================================================
-# Local development
-# ============================================================
 
 if __name__ == "__main__":
 
